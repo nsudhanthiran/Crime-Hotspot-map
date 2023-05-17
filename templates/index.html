@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crime Hotspot Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+      }
+
+      h1 {
+        margin: 0;
+        padding: 0.9rem;
+        background-color: #333;
+        color: #fff;
+        text-align: center;
+      }
+
+      #map {
+          height: 525px;
+          width: 100%;
+      }
+
+      #progress-bar {
+          width: 100%;
+          height: 30px;
+          background-color: #f3f3f3;
+          position: relative;
+          border: 1px solid #000;
+      }
+
+      #progress {
+          height: 100%;
+          width: 0; 
+          background: green;
+          position: absolute;
+      }
+
+      #progress-label {
+          position: absolute;
+          width: 100%;
+          text-align: center;
+          font-weight: bold;
+      }
+
+      #danger-level-label {
+          margin-top: 10px;
+          font-weight: bold;
+          padding: 1rem;
+          background-color: #333;
+          color: white;
+      }
+
+      #crime-info {
+          margin-top: 1rem;
+          border: 1px solid #333;
+          padding: 1rem;
+          display: none;
+      }
+
+      #crime-info h2 {
+          margin: 0 0 1rem 0;
+      }
+
+      #crime-info p {
+          margin: 0;
+      }
+  </style>
+</head>
+<body>
+    <h1>Crime Hotspot Map</h1>
+    <div id="map"></div>
+    <div id="coordinates"></div>
+    <div id="progress-bar">
+      <div id="progress"></div>
+      <span id="progress-label">0%</span>
+    </div>
+    <div id="danger-level-label">Danger Level: <span id="danger-level"></span></div>
+    <div id="crime-info">
+        <h2>Crime Information</h2>
+        <p id="crime-type"></p>
+        <p id="crime-date"></p>
+        <p id="crime-location"></p>
+    </div>
+
+    <script>
+
+        // Define the southwest and northeast corners of the bounding box
+        var southwest = L.latLng(41.644335, -87.940266);
+        var northeast = L.latLng(42.023131, -87.523660);
+        var bounds = L.latLngBounds(southwest, northeast);
+
+        // Initialize the map
+        var map = L.map('map').setView([41.85246761380677,-87.65133333166888], 17);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Set the maximum bounds of the map to the Chicago area
+        map.setMaxBounds(bounds);
+
+        // Add a draggable marker
+        var marker = L.marker([41.85246761380677,-87.65133333166888], {draggable: true}).addTo(map);
+
+        // Update latitude and longitude in real time
+        marker.on('drag', function(e) {
+            var lat = e.target.getLatLng().lat;
+            var lng = e.target.getLatLng().lng;
+            map.panTo(marker.getLatLng());
+            updateProgress(lat, lng);
+            keepMarkerInsideBounds();
+        });
+
+        marker.on('click', function () {
+        keepMarkerInsideBounds();
+        });
+
+        // Move the marker back inside the boundary if it goes outside
+        function keepMarkerInsideBounds() {
+            var markerPos = marker.getLatLng();
+            if (!bounds.contains(markerPos)) {
+                var lat = Math.min(Math.max(markerPos.lat, bounds.getSouth()), bounds.getNorth());
+                var lng = Math.min(Math.max(markerPos.lng, bounds.getWest()), bounds.getEast());
+                marker.setLatLng([lat, lng]);
+                circle.setLatLng([lat, lng])
+            }
+            }
+
+
+        function updateProgress(latitude, longitude) {
+            console.log('Updating progress for lat:', latitude, 'lng:', longitude);
+            $.ajax({
+                url: 'update_marker_coordinates',
+                type: 'POST',
+                data: {
+                    'latitude': latitude,
+                    'longitude': longitude,
+                    'csrfmiddlewaretoken': $('input[name="csrfmiddlewaretoken"]').val()  // Get the CSRF token value
+                },
+
+                success: function(response) {
+                    console.log('Response:', response);
+                    if (response.status === 'success') {
+                        var progress = response.progress;
+                        $('#progress').css('width', progress + '%');
+                        $('#progress-label').text(progress.toFixed(2) + '%');
+
+                        // Set danger level based on progress
+                        var dangerLevel = '';
+                        if (progress < 20) {
+                            dangerLevel = 'Low';
+                        } else if (progress >= 20 && progress < 50) {
+                            dangerLevel = 'Moderate';
+                        } else if (progress >= 50 && progress < 80) {
+                            dangerLevel = 'High';
+                        } else {
+                            dangerLevel = 'Very High';
+                        }
+                        $('#danger-level').text(dangerLevel);
+                    }
+                }
+            });
+        }
+
+        // Add a circle to the map to indicate danger level
+        var circle = L.circle([41.85246761380677,-87.65133333166888], {
+            color: 'blue',
+            fillColor: 'blue',
+            fillOpacity: 0.5,
+            radius: 80,
+        }).addTo(map);
+
+        // Update the circle based on progress
+        function updateCircle(progress) {
+            console.log('Updating circle for progress:', progress);
+            var radius = 100;
+            if (progress >= 20 && progress < 50) {
+                radius = 200;
+            } else if (progress >= 50 && progress < 80) {
+                radius = 300;
+            } else if (progress >= 80) {
+                radius = 400;
+            }
+            circle.setRadius(radius);
+        }
+
+        // Fetch the initial progress from the server
+        $.ajax({
+            url: 'get_initial_progress',
+            type: 'GET',
+            success: function(response) {
+                console.log('Initial progress:', response.progress);
+                var progress = response.progress;
+                $('#progress').css('width', progress + '%');
+                $('#progress-label').text(progress.toFixed(2) + '%');
+
+                // Set danger level based on progress
+                var dangerLevel = '';
+                if (progress < 20) {
+                    dangerLevel = 'Low';
+                } else if (progress >= 20 && progress < 50) {
+                    dangerLevel = 'Moderate';
+                } else if (progress >= 50 && progress < 80) {
+                    dangerLevel = 'High';
+                } else {
+                    dangerLevel = 'Very High';
+                }
+                $('#danger-level').text(dangerLevel);
+
+                // Update the circle based on progress
+                updateCircle(progress);
+            }
+        });
+
+        // Periodically fetch progress from the server
+        // Initialize the map
+var map = L.map('map').setView([41.85246761380677,-87.65133333166888], 17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+
+// Add a draggable marker
+var marker = L.marker([41.85246761380677,-87.65133333166888], {draggable: true}).addTo(map);
+
+// Add a circle
+
+
+// Update latitude and longitude in real time
+marker.on('drag', function(e) {
+    var lat = e.target.getLatLng().lat;
+    var lng = e.target.getLatLng().lng;
+    map.panTo(marker.getLatLng());
+    updateProgress(lat, lng);
+    circle.setLatLng([lat, lng]);
+
+    //move the circle along with the marker
+    var radius = circle.getRadius();
+    circle.setLatLng(e.target.getLatLng());
+    circle.setRadius(radius);
+});
+
+function updateProgress(latitude, longitude) {
+    console.log('Updating progress for lat:', latitude, 'lng:', longitude);
+    $.ajax({
+        url: 'update_marker_coordinates',
+        type: 'POST',
+        data: {
+            'latitude': latitude,
+            'longitude': longitude,
+            'csrfmiddlewaretoken': $('input[name="csrfmiddlewaretoken"]').val()  // Get the CSRF token value
+        },
+
+        success: function(response) {
+            console.log('Response:', response);
+            if (response.status === 'success') {
+                var progress = response.progress;
+                $('#progress').css('width', progress + '%');
+                $('#progress-label').text(progress.toFixed(2) + '%');
+
+                // Set danger level based on progress
+                var dangerLevel = '';
+                if (progress < 20) {
+                    dangerLevel = 'Low'
+                } else if (progress >= 20 && progress < 50) {
+                    dangerLevel = 'Moderate';
+                } else if (progress >= 50 && progress < 80) {
+                    dangerLevel = 'High';
+                } else {
+                    dangerLevel = 'Very High';
+                }
+                $('#danger-level-label').text('Danger Level: ' + dangerLevel);
+
+                // Update the position of the circle
+                circle.setLatLng([latitude, longitude]);
+            }
+        }
+    });
+}
+
+// Move the circle randomly every 2 seconds
+setInterval(function() {
+    var lat = marker.getLatLng().lat + (Math.random() - 0.5) * 0.002;
+    var lng = marker.getLatLng().lng + (Math.random() - 0.5) * 0.002;
+    circle.setLatLng([lat, lng]);
+}, 2000);
+
+
+</script>
+</body>
+</html>
+
